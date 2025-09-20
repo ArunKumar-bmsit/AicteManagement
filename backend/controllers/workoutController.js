@@ -1,5 +1,6 @@
 const Workout = require('../models/workoutModel');
 const mongoose = require('mongoose');
+const fs = require('fs');
 const path = require('path');
 
 // get all workouts
@@ -7,6 +8,7 @@ const getWorkouts = async (req, res) => {
   try {
     const userId = req.user._id; // Ensure user ID is extracted from the authenticated user
     const workouts = await Workout.find({ user_id: userId }) // Filter workouts by the logged-in user's ID
+      .select('-certificate.data') // Do not include large binary in list response
       .populate('user_id', 'email') // Populate user_id with the email field from User model
       .sort({ createdAt: -1 });
     console.log("Workout Response:", workouts);
@@ -27,7 +29,7 @@ const getWorkout = async (req, res) => {
   }
 
   try {
-    const workout = await Workout.findById(id);
+    const workout = await Workout.findById(id).select('-certificate.data');
 
     if (!workout) {
       return res.status(404).json({ error: "No such workout" });
@@ -64,16 +66,16 @@ const createWorkout = async (req, res) => {
   try {
     const user_id = mongoose.Types.ObjectId(req.user._id); // Assume user is authenticated
 
-    // Store the certificate details in the workout
+    // Store the certificate file buffer and metadata directly in MongoDB
     const workout = await Workout.create({
       title,
       points,
       user_id,
       certificate: {
-        path: `/uploads/${certificate.filename}`, // Path to the file in the 'uploads' folder
-        filename: certificate.filename,           // Filename
-        size: certificate.size,                   // File size in bytes
-        contentType: certificate.mimetype,        // MIME type (e.g., 'application/pdf', 'image/png')
+        data: certificate.buffer,
+        filename: certificate.originalname,
+        size: certificate.size,
+        contentType: certificate.mimetype,
       },
     });
 
@@ -118,7 +120,12 @@ const updateWorkout = async (req, res) => {
       return res.status(400).json({ error: "Invalid file format for certificate" });
     }
 
-    updates.certificate = `/uploads/${certificate.filename}`; // Update with relative path
+    updates.certificate = {
+      data: certificate.buffer,
+      filename: certificate.originalname,
+      size: certificate.size,
+      contentType: certificate.mimetype,
+    };
   }
 
   try {
@@ -151,7 +158,12 @@ const getAllWorkoutsForAdmin = async (req, res) => {
               title: "$title",
               points: "$points",
               createdAt: "$createdAt",
-              certificate: "$certificate",
+              // Only include certificate metadata to keep payload small
+              certificate: {
+                filename: "$certificate.filename",
+                size: "$certificate.size",
+                contentType: "$certificate.contentType",
+              },
             },
           },
         },
@@ -187,6 +199,62 @@ const getAllWorkoutsForAdmin = async (req, res) => {
   }
 };
 
+// Get a workout certificate
+const getWorkoutCertificate = async (req, res) => {
+  const { id } = req.params;
+
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return res.status(404).json({ error: "No such workout" });
+  }
+
+  try {
+    const workout = await Workout.findById(id);
+
+    if (!workout) {
+      return res.status(404).json({ error: "No such workout" });
+    }
+
+    if (!workout.certificate) {
+      return res.status(404).json({ error: "No certificate found for this workout" });
+    }
+
+    const certificate = workout.certificate;
+
+    // If buffer data exists (new storage), send it
+    if (certificate.data) {
+      const asDownload = req.query.download === '1';
+      if (asDownload) {
+        res.set("Content-Disposition", `attachment; filename="${certificate.filename}"`);
+      } else {
+        res.set("Content-Disposition", `inline; filename="${certificate.filename}"`);
+      }
+      res.set("Content-Type", certificate.contentType || 'application/octet-stream');
+      return res.status(200).send(certificate.data);
+    }
+
+    // Legacy fallback: if only path exists, try reading from disk
+    if (certificate.path) {
+      const rel = certificate.path.replace(/^\//, '');
+      const absolutePath = path.join(process.cwd(), rel);
+      if (fs.existsSync(absolutePath)) {
+        const asDownload = req.query.download === '1';
+        if (asDownload) {
+          res.set("Content-Disposition", `attachment; filename="${path.basename(absolutePath)}"`);
+        } else {
+          res.set("Content-Disposition", `inline; filename="${path.basename(absolutePath)}"`);
+        }
+        res.set("Content-Type", certificate.contentType || 'application/octet-stream');
+        const stream = fs.createReadStream(absolutePath);
+        return stream.pipe(res);
+      }
+    }
+
+    return res.status(404).json({ error: "Certificate file not found" });
+  } catch (error) {
+    console.error("Error retrieving workout certificate:", error); // Debugging statement
+    res.status(500).json({ error: error.message });
+  }
+};
 
 module.exports = {
   getWorkouts,
@@ -195,4 +263,5 @@ module.exports = {
   deleteWorkout,
   updateWorkout,
   getAllWorkoutsForAdmin, // Export function for use in routes
+  getWorkoutCertificate,
 };

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useWorkoutsContext } from "../hooks/useWorkoutsContext";
 import { useAuthContext } from "../hooks/useAuthContext";
 
@@ -9,6 +9,10 @@ const WorkoutDetails = ({ workout }) => {
   const { dispatch } = useWorkoutsContext();
   const { user } = useAuthContext();
   const [showPreview, setShowPreview] = useState(false); // Toggle state for certificate preview
+  const [previewUrl, setPreviewUrl] = useState(null);
+  const [previewType, setPreviewType] = useState(null); // mime type
+  const [loadingPreview, setLoadingPreview] = useState(false);
+  const [previewError, setPreviewError] = useState(null);
 
   const handleClick = async () => {
     if (!user) {
@@ -28,44 +32,86 @@ const WorkoutDetails = ({ workout }) => {
     }
   };
 
-  const renderCertificatePreview = () => {
-    if (workout.certificate && workout.certificate.path) {
-      const fileSrc = workout.certificate.path; // Use the path from the backend
-      const contentType = workout.certificate.contentType;
-
-      if (contentType && contentType.startsWith("image")) {
-        return (
-          <img
-            src={fileSrc}
-            alt="Certificate Preview"
-            style={{
-              maxWidth: "100%",
-              height: "auto",
-              border: "1px solid #ddd",
-              borderRadius: "5px",
-              padding: "5px",
-            }}
-          />
-        );
-      } else if (contentType && contentType === "application/pdf") {
-        return (
-          <embed
-            src={fileSrc}
-            type="application/pdf"
-            style={{
-              width: "100%",
-              height: "500px",
-              border: "1px solid #ddd",
-              borderRadius: "5px",
-            }}
-          />
-        );
-      } else {
-        return <p style={{ color: "red" }}>Unsupported certificate format.</p>;
+  // Fetch and prepare preview securely via authenticated request
+  useEffect(() => {
+    let revoked = false;
+    const loadPreview = async () => {
+      if (!showPreview) return;
+      if (!user) return;
+      if (!workout || !workout._id) return;
+      setPreviewError(null);
+      setLoadingPreview(true);
+      try {
+        const resp = await fetch(`/api/workouts/${workout._id}/certificate`, {
+          headers: { Authorization: `Bearer ${user.token}` },
+        });
+        if (!resp.ok) {
+          const msg = `Failed to load certificate (${resp.status})`;
+          setPreviewError(msg);
+          setLoadingPreview(false);
+          return;
+        }
+        const contentType = resp.headers.get('Content-Type') || 'application/octet-stream';
+        const blob = await resp.blob();
+        const url = URL.createObjectURL(blob);
+        if (!revoked) {
+          // Cleanup previous url if any
+          if (previewUrl) URL.revokeObjectURL(previewUrl);
+          setPreviewUrl(url);
+          setPreviewType(contentType);
+        }
+      } catch (e) {
+        setPreviewError('Error loading certificate');
+      } finally {
+        if (!revoked) setLoadingPreview(false);
       }
-    }
+    };
+    loadPreview();
+    return () => {
+      revoked = true;
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showPreview, workout?._id, user?.token]);
 
-    return <p>No certificate available.</p>;
+  const renderCertificatePreview = () => {
+    if (!workout.certificate) {
+      return <p>No certificate available.</p>;
+    }
+    if (loadingPreview) return <p>Loading certificate...</p>;
+    if (previewError) return <p style={{ color: 'red' }}>{previewError}</p>;
+    if (!previewUrl) return null;
+
+    if (previewType && previewType.startsWith('image')) {
+      return (
+        <img
+          src={previewUrl}
+          alt="Certificate Preview"
+          style={{
+            maxWidth: "100%",
+            height: "auto",
+            border: "1px solid #ddd",
+            borderRadius: "5px",
+            padding: "5px",
+          }}
+        />
+      );
+    }
+    if (previewType === 'application/pdf') {
+      return (
+        <embed
+          src={previewUrl}
+          type="application/pdf"
+          style={{
+            width: "100%",
+            height: "500px",
+            border: "1px solid #ddd",
+            borderRadius: "5px",
+          }}
+        />
+      );
+    }
+    return <p>Unsupported certificate format.</p>;
   };
 
   const togglePreview = () => {
@@ -88,6 +134,15 @@ const WorkoutDetails = ({ workout }) => {
 
       {/* Conditionally render certificate preview */}
       {showPreview && renderCertificatePreview()}
+
+      {/* Optional download link if previewUrl exists */}
+      {showPreview && previewUrl && (
+        <div style={{ marginTop: '8px' }}>
+          <a href={previewUrl} download={workout?.certificate?.filename || 'certificate'}>
+            Download Certificate
+          </a>
+        </div>
+      )}
 
       <span className="material-symbols-outlined" onClick={handleClick}>
         delete

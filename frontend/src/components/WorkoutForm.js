@@ -14,11 +14,58 @@ const WorkoutForm = () => {
 
   const fileInputRef = useRef(); // Ref for the file input
 
+  const MAX_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB
+  const ALLOWED_TYPES = ['application/pdf', 'image/jpeg', 'image/png'];
+
+  const handleFileChange = (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) {
+      setCertificate(null);
+      return;
+    }
+
+    // Validate type
+    if (!ALLOWED_TYPES.includes(file.type)) {
+      setError('Invalid file type. Allowed: PDF, JPG, JPEG, PNG');
+      setCertificate(null);
+      // reset the input so same file can be re-selected after change
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+
+    // Validate size
+    if (file.size > MAX_SIZE_BYTES) {
+      setError('File too large. Max 10 MB allowed.');
+      setCertificate(null);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+
+    setError(null);
+    setCertificate(file);
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
 
     if (!user) {
       setError('You must be logged in');
+      return;
+    }
+
+    // Client-side validation mirror
+    if (!title || !points || !certificate) {
+      const missing = [];
+      if (!title) missing.push('title');
+      if (!points) missing.push('points');
+      if (!certificate) missing.push('certificate');
+      setEmptyFields(missing);
+      setError('Please fill in all the fields');
+      return;
+    }
+
+    if (certificate && (!ALLOWED_TYPES.includes(certificate.type) || certificate.size > MAX_SIZE_BYTES)) {
+      setError('Invalid certificate. Check file type and size.');
       return;
     }
 
@@ -79,9 +126,14 @@ const WorkoutForm = () => {
       <input
         type="file"
         accept=".pdf,.jpg,.jpeg,.png"
-        onChange={(e) => setCertificate(e.target.files[0])}
+        onChange={handleFileChange}
         ref={fileInputRef} // Attach the ref
       />
+      {certificate && (
+        <div style={{ marginTop: '0.5rem', fontSize: '0.9rem' }}>
+          Selected: {certificate.name} ({Math.round(certificate.size / 1024)} KB)
+        </div>
+      )}
 
       <button>Add Workout</button>
       {error && <div className="error">{error}</div>}

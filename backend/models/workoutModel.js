@@ -16,21 +16,21 @@ const workoutSchema = new Schema({
     ref: 'User',
   },
   certificate: {
-    // Only store the file path in the database
-    path: {
-      type: String,  // Path to the file in the uploads folder
+    // Store the file directly in MongoDB with metadata
+    data: {
+      type: Buffer, // Binary data of the uploaded file
       required: true,
     },
     filename: {
-      type: String,  // Store the file name
+      type: String, // Original file name
       required: true,
     },
     size: {
-      type: Number,  // Store the file size
+      type: Number, // File size in bytes
       required: true,
     },
     contentType: {
-      type: String,  // MIME type (e.g., 'application/pdf', 'image/png')
+      type: String, // MIME type (e.g., 'application/pdf', 'image/png')
       required: true,
     },
   },

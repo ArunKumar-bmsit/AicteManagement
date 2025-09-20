@@ -7,21 +7,13 @@ const {
   deleteWorkout,
   updateWorkout,
   getAllWorkoutsForAdmin,
+  getWorkoutCertificate,
 } = require('../controllers/workoutController');
 const requireAuth = require('../middleware/requireAuth');
 
-// Configure Multer for file uploads (using disk storage)
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, 'uploads/'); // Specify the 'uploads' folder as the destination
-  },
-  filename: (req, file, cb) => {
-    // Generate a unique filename based on the current timestamp and original filename
-    cb(null, Date.now() + '-' + file.originalname);
-  },
-});
-
-const upload = multer({ storage: storage });
+// Configure Multer for file uploads (using memory storage)
+const storage = multer.memoryStorage();
+const upload = multer({ storage });
 
 const router = express.Router();
 
@@ -30,6 +22,9 @@ router.use(requireAuth);
 
 // GET all workouts
 router.get('/', getWorkouts);
+
+// GET certificate bytes for a workout (must be before generic ':id' route)
+router.get('/:id/certificate', getWorkoutCertificate);
 
 // GET a single workout
 router.get('/:id', getWorkout);
